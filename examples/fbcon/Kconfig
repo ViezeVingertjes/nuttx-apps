@@ -131,6 +131,14 @@ config EXAMPLES_FBCON_LINESPACING
 		bounding box dimension of the font, and (2) this additional line
 		space.  This value may be zero, but not negative.
 	
+config EXAMPLES_FBCON_MARGIN
+	int "Margin (pixels)"
+	default 0
+	---help---
+		Keep the console this many pixels away from every edge of the
+		display, e.g. so that text is not hidden by the rounded corners
+		of a panel.  The margin is filled with the background color.
+
 config EXAMPLES_FBCON_NOWRAP
 	bool "No wrap"
 	default n

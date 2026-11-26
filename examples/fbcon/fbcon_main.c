@@ -209,6 +209,13 @@
 
 #define FBCON_LINESPACING CONFIG_EXAMPLES_FBCON_LINESPACING
 
+/* The console is drawn this many pixels inside the display edges: drawing
+ * uses console coordinates and only fbcon_bitmap(), fbcon_fill() and
+ * fbcon_markdirty() add the margin.
+ */
+
+#define FBCON_MARGIN      CONFIG_EXAMPLES_FBCON_MARGIN
+
 /* Cursor character */
 
 #define FBCON_CURSORCHAR CONFIG_EXAMPLES_FBCON_CURSORCHAR
@@ -243,6 +250,7 @@ enum exitcode_e
   FBCON_EXIT_POSIX_SPAWN_FAILED,
   FBCON_EXIT_APP_INDEX_UNAVAILABLE,
   FBCON_EXIT_APP_POSIX_ATTRIB_INIT_FAILED,
+  FBCON_EXIT_MARGIN,
 };
 
 /* Describes one cached glyph bitmap */
@@ -668,8 +676,9 @@ static int fbcon_bitmap(FAR struct fbcon_state_s      *st,
   srow = (FAR const uint8_t *)src +
          stride * (dest->pt1.y - origin->y) +
          FBCON_OFFSET(dest->pt1.x - origin->x);
-  drow = (FAR uint8_t *)st->fbmem + st->pinfo->stride * dest->pt1.y +
-         FBCON_OFFSET(dest->pt1.x);
+  drow = (FAR uint8_t *)st->fbmem +
+         st->pinfo->stride * (dest->pt1.y + FBCON_MARGIN) +
+         FBCON_OFFSET(dest->pt1.x + FBCON_MARGIN);
 
   for (y = dest->pt1.y; y <= dest->pt2.y; y++)
     {
@@ -690,21 +699,28 @@ static int fbcon_bitmap(FAR struct fbcon_state_s      *st,
  * Name: fbcon_markdirty
  *
  * Description:
- *   Add a rectangle to the area of the framebuffer that has changed since
- *   the last fbcon_update().
+ *   Add a rectangle, in console coordinates, to the area of the framebuffer
+ *   that has changed since the last fbcon_update().
  *
  ****************************************************************************/
 
 static void fbcon_markdirty(FAR struct fbcon_state_s *st,
                             FAR const struct nxgl_rect_s *rect)
 {
+  struct nxgl_rect_s area;
+
+  area.pt1.x = rect->pt1.x + FBCON_MARGIN;
+  area.pt1.y = rect->pt1.y + FBCON_MARGIN;
+  area.pt2.x = rect->pt2.x + FBCON_MARGIN;
+  area.pt2.y = rect->pt2.y + FBCON_MARGIN;
+
   if (st->isdirty)
     {
-      nxgl_rectunion(&st->dirty, &st->dirty, rect);
+      nxgl_rectunion(&st->dirty, &st->dirty, &area);
     }
   else
     {
-      nxgl_rectcopy(&st->dirty, rect);
+      nxgl_rectcopy(&st->dirty, &area);
       st->isdirty = true;
     }
 }
@@ -1364,8 +1380,9 @@ static int fbcon_fill(FAR struct fbcon_state_s *st,
   int y;
 
   width = rect->pt2.x - rect->pt1.x + 1;
-  row   = (FAR uint8_t *)st->fbmem + st->pinfo->stride * rect->pt1.y +
-          FBCON_OFFSET(rect->pt1.x);
+  row   = (FAR uint8_t *)st->fbmem +
+          st->pinfo->stride * (rect->pt1.y + FBCON_MARGIN) +
+          FBCON_OFFSET(rect->pt1.x + FBCON_MARGIN);
 
   for (y = rect->pt1.y; y <= rect->pt2.y; y++)
     {
@@ -2254,10 +2271,19 @@ static int fbcon_initialize(FAR struct fbcon_state_s *st)
   st->isdirty = false;
 #endif
 
-  rect.pt1.x = 0;
-  rect.pt1.y = 0;
-  rect.pt2.x = st->vinfo->xres - 1;
-  rect.pt2.y = st->vinfo->yres - 1;
+  if (2 * FBCON_MARGIN >= st->vinfo->xres ||
+      2 * FBCON_MARGIN >= st->vinfo->yres)
+    {
+      gerr("ERROR: fbcon_main: margin too large for the display\n");
+      return FBCON_EXIT_MARGIN;
+    }
+
+  /* Clear the whole display, margin included (console coordinates) */
+
+  rect.pt1.x = -FBCON_MARGIN;
+  rect.pt1.y = -FBCON_MARGIN;
+  rect.pt2.x = st->vinfo->xres - FBCON_MARGIN - 1;
+  rect.pt2.y = st->vinfo->yres - FBCON_MARGIN - 1;
   ret = fbcon_fill(st, &rect, &st->bcolor);
   if (ret < 0)
     {
@@ -2270,10 +2296,10 @@ static int fbcon_initialize(FAR struct fbcon_state_s *st)
   st->fwidth      = fontset->mxwidth;
   st->spwidth     = fontset->spwidth;
 
-  /* we use the entire LCD area for the console */
+  /* The console uses the display area inside the margin */
 
-  st->wsize.h     = st->vinfo->yres;
-  st->wsize.w     = st->vinfo->xres;
+  st->wsize.h     = st->vinfo->yres - 2 * FBCON_MARGIN;
+  st->wsize.w     = st->vinfo->xres - 2 * FBCON_MARGIN;
 
   st->cursor.code  = FBCON_CURSORCHAR;
   if (FBCON_CURSORCHAR != ASCII_SPACE)
